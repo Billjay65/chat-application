@@ -9,12 +9,19 @@ const express = require('express');
 const myDB = require('./connection');
 const fccTesting = require('./freeCodeCamp/fcctesting.js');
 const session = require('express-session');
-const http = require('http').createServer(app);
-const io = require('socket.io')(http);
-
+const passport = require('passport');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const app = express();
+
+const http = require('http').createServer(app);
+const io = require('socket.io')(http);
+// authenticate with socket.io
+const passportSocketIo = require('passport.socketio');
+const cookieParser = require('cookie-parser');
+const MongoStore = require('connect-mongo')(session);
+const URI = process.env.MONGO_URI;
+const store = new MongoStore({ url: URI });
 
 // add origin and credentials to handle logout cookies
 // this helped pass the test: Registration of New Users
@@ -36,8 +43,21 @@ app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: true,
   saveUninitialized: true,
-  cookie: { secure: false }
+  cookie: { secure: false },
+  key: 'express.sid',
+  store: store
 }));
+
+io.use(
+  passportSocketIo.authorize({
+    cookieParser: cookieParser,
+    key: 'express.sid',
+    secret: process.env.SESSION_SECRET,
+    store: store,
+    success: onAuthorizeSuccess,
+    fail: onAuthorizeFail
+  })
+);
 
 // assign pug as the view engine property's value
 app.set('view engine', 'pug');
@@ -51,6 +71,36 @@ myDB(async client => {
   // instantiate modules
   routes(app, myDataBase);
   auth(app, myDataBase);
+  
+  // keep track of users
+  let currentUsers = 0;
+  // listen for connections to server
+  io.on('connection', socket => {
+    console.log('A user has connected');
+    ++currentUsers;
+    io.emit('user', {
+      username: socket.request.user.username,
+      currentUsers,
+      connected: true
+    });
+    console.log('A user has connected');
+    // this is after athentication with socket.io
+    console.log('user ' + socket.request.user.username + ' connected');
+    // listen for chat messages emitted by 
+    // connected users
+    socket.on('chat message', (message) => {
+      io.emit('chat message', { username: socket.request.user.username, message });
+    });
+    socket.on('disconnect', () => {
+      console.log('A user has disconnected');
+      --currentUsers;
+      io.emit('user', {
+        username: socket.request.user.username,
+        currentUsers,
+        connected: false
+      });
+    });
+  });
 
   // page not found error server api
   app.use((req, res, next) => {
@@ -64,8 +114,20 @@ myDB(async client => {
   });
 });
 
+// functions used by authentication with socket.io
+function onAuthorizeSuccess(data, accept) {
+  console.log('successful connection to socket.io');
+
+  accept(null, true);
+}
+
+function onAuthorizeFail(data, message, error, accept) {
+  if (error) throw new Error(message);
+  console.log('failed connection to socket.io:', message);
+  accept(null, false);
+}
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+http.listen(PORT, () => {
   console.log('Listening on port ' + PORT);
 });

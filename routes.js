@@ -1,4 +1,5 @@
 const passport = require('passport');
+const bcrypt = require('bcrypt');
 
 module.exports = function (app, myDataBase) {
   app.use(passport.initialize());
@@ -14,9 +15,26 @@ module.exports = function (app, myDataBase) {
     });
   });
 
+  /*
   // authentication api endpoint server
   app.route('/login').post(passport.authenticate('local', { failureRedirect: '/' }), (req, res) => {
     res.redirect('/profile');
+  });
+  */
+  // use amzi, amzi for loggin in and testing
+  app.route('/login').post((req, res, next) => {
+    passport.authenticate('local', (err, user, info) => {
+      if (err) return next(err);
+      if (!user) {
+        console.log('Login failed');
+        return res.redirect('/');
+      }
+      req.logIn(user, err => {
+        if (err) return next(err);
+        console.log('Login successful for:', user.username);
+        return res.redirect('/profile');
+      });
+    })(req, res, next);
   });
 
   // user /profile route api endpoint server
@@ -68,7 +86,12 @@ module.exports = function (app, myDataBase) {
               } else {
                 // The inserted document is held within
                 // the ops property of the doc
-                next(null, doc.ops[0]);
+                // next(null, doc.ops[0]);
+                /*** MyVersion  ***/
+                myDataBase.findOne({ _id: doc.insertedId }, (err, newUser) => {
+                  if (err) return res.redirect('/');
+                  next(null, newUser);
+                });
               }
             }
           )
@@ -82,28 +105,28 @@ module.exports = function (app, myDataBase) {
     );
 
   app.route('/auth/github')
-  .get(passport.authenticate('github'));
+    .get(passport.authenticate('github'));
 
   app.route('/auth/github/callback')
-  .get(passport.authenticate('github', { failureRedirect: '/' }), (req, res) => {
-    req.session.user_id = req.user.id
-    res.redirect('/chat');
-  });
+    .get(passport.authenticate('github', { failureRedirect: '/' }), (req, res) => {
+      req.session.user_id = req.user.id
+      res.redirect('/chat');
+    });
 
   app.route('/chat')
-  .get(ensureAuthenticated, (req, res) => {
-    res.render('chat', {
-      user: req.user
+    .get(ensureAuthenticated, (req, res) => {
+      res.render('chat', {
+        user: req.user
+      });
     });
-  });
 
-// authentication middleware function
-// always place this below the database connection
-function ensureAuthenticated(req, res, next) {
-  if (req.isAuthenticated()) {
-    return next();
-  }
-  res.redirect('/');
-};
+  // authentication middleware function
+  // always place this below the database connection
+  function ensureAuthenticated(req, res, next) {
+    if (req.isAuthenticated()) {
+      return next();
+    }
+    res.redirect('/');
+  };
 
 }
